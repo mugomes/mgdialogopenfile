@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -19,239 +18,234 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-var lastDirFile = filepath.Join(os.TempDir(), ".mgdialogfileopen_lastdir")
+type FileDialogOpen struct {
+	a           fyne.App
+	title       string
+	exts        []string
+	multiSelect bool
+	onSelect    func([]string)
 
-// Callback genérico: se multiSelect = false → len(paths) == 1
-type FileSelectCallback func(paths []string)
+	lastDir string
+}
 
-// Show cria e retorna uma janela seletora de arquivos não modal.
-//
-// Parâmetros:
-//   - a: aplicação Fyne
-//   - title: título da janela
-//   - exts: extensões aceitas (ex: []string{".jpg", ".png"} ou nil para todos)
-//   - multiSelect: true para permitir selecionar múltiplos arquivos
-//   - onSelect: callback com os arquivos selecionados
-func Show(a fyne.App, title string, exts []string, multiSelect bool, onSelect FileSelectCallback) fyne.Window {
-	win := a.NewWindow(title)
-	win.Resize(fyne.NewSize(800, 500))
+var lastDirFile = filepath.Join(os.TempDir(), "mgdialogopenfile_lastdir.txt")
+
+// API EXIGIDA PELO SEU MAIN
+func New(a fyne.App, title string, exts []string, multiselect bool, onSelect func([]string)) *FileDialogOpen {
+	dlg := &FileDialogOpen{
+		a:           a,
+		title:       title,
+		exts:        exts,
+		multiSelect: multiselect,
+		onSelect:    onSelect,
+	}
+	dlg.loadLastDir()
+	return dlg
+}
+
+func (d *FileDialogOpen) Show() {
+	win := d.a.NewWindow(d.title)
+	win.Resize(fyne.NewSize(740, 520))
 	win.CenterOnScreen()
 
-	dir := loadLastDir()
+	dir := d.lastDir
 	if dir == "" {
-		dir, _ = os.Getwd()
+		dir, _ = os.UserHomeDir()
 	}
 
 	pathLabel := widget.NewLabel(dir)
-	searchEntry := widget.NewEntry()
-	searchEntry.SetPlaceHolder("🔍 Buscar arquivo...")
+	search := widget.NewEntry()
+	search.SetPlaceHolder("🔍 Buscar...")
 
-	files := listDir(dir, exts)
+	files := d.listDir(dir)
 	filtered := files
-
 	selected := map[int]bool{}
-
-	icon := func(info fs.FileInfo) fyne.Resource {
-		if info.IsDir() {
-			return theme.FolderIcon()
-		}
-		return theme.FileIcon()
-	}
 
 	list := widget.NewList(
 		func() int { return len(filtered) },
-		func() fyne.CanvasObject {
-			return container.NewHBox(
-				widget.NewIcon(nil),
-				widget.NewLabel(""),
-			)
-		},
-		func(i widget.ListItemID, o fyne.CanvasObject) {
-			ico := o.(*fyne.Container).Objects[0].(*widget.Icon)
-			lbl := o.(*fyne.Container).Objects[1].(*widget.Label)
-			f := filtered[i]
-			ico.SetResource(icon(f))
+		func() fyne.CanvasObject { return widget.NewLabel("") },
+		func(id widget.ListItemID, o fyne.CanvasObject) {
+			row := filtered[id]
+			name := row.Name()
 
-			// destaca seleção múltipla
-			if selected[i] {
-				lbl.SetText("✔ " + f.Name())
+			if selected[id] {
+				o.(*widget.Label).SetText("✔ " + name)
 			} else {
-				lbl.SetText(f.Name())
+				if row.IsDir() {
+					o.(*widget.Label).SetText("📁 " + name)
+				} else {
+					o.(*widget.Label).SetText("📄 " + name)
+				}
 			}
 		},
 	)
 
-	updateList := func() {
-		search := strings.ToLower(searchEntry.Text)
-		filtered = []fs.FileInfo{}
-		for _, f := range files {
-			if search == "" || strings.Contains(strings.ToLower(f.Name()), search) {
-				filtered = append(filtered, f)
-			}
-		}
-		list.Refresh()
-	}
-
-	searchEntry.OnChanged = func(s string) { updateList() }
-
 	list.OnSelected = func(id widget.ListItemID) {
+		if id < 0 || id >= len(filtered) {
+			return
+		}
 		f := filtered[id]
+
+		// Abrir diretório
 		if f.IsDir() {
-			// ao clicar em pasta, entra
 			dir = filepath.Join(dir, f.Name())
 			pathLabel.SetText(dir)
-			files = listDir(dir, exts)
-			updateList()
+			files = d.listDir(dir)
+			filtered = d.applyFilter(files, search.Text)
 			selected = map[int]bool{}
-			return
-		}
-
-		if multiSelect {
-			selected[id] = !selected[id]
 			list.Refresh()
-		} else {
-			selected = map[int]bool{id: true}
-			openSelection(win, dir, filtered, selected, onSelect)
-		}
-	}
-
-	var lastClickTime time.Time
-	var lastClickID widget.ListItemID = -1
-
-	list.OnSelected = func(id widget.ListItemID) {
-		f := filtered[id]
-
-		// Verifica duplo clique
-		now := time.Now()
-		if lastClickID == id && now.Sub(lastClickTime) < 400*time.Millisecond {
-			// duplo clique detectado
-			if f.IsDir() {
-				dir = filepath.Join(dir, f.Name())
-				pathLabel.SetText(dir)
-				files = listDir(dir, exts)
-				updateList()
-				selected = map[int]bool{}
-			} else if !multiSelect {
-				saveLastDir(dir)
-				onSelect([]string{filepath.Join(dir, f.Name())})
-				win.Close()
-			}
-			lastClickID = -1
 			return
 		}
 
-		lastClickID = id
-		lastClickTime = now
+		// Abrir arquivo (somente single-select)
+		if !d.multiSelect {
+			d.saveLastDir(dir)
+			d.onSelect([]string{filepath.Join(dir, f.Name())})
+			win.Close()
+			return
+		}
 
-		// Clique simples (seleciona)
+		// Clique simples
 		if f.IsDir() {
-			// só destaca diretórios, não abre
+			// apenas destaca a pasta
 			selected = map[int]bool{id: true}
 		} else {
-			if multiSelect {
+			if d.multiSelect {
 				selected[id] = !selected[id]
-				list.Refresh()
 			} else {
 				selected = map[int]bool{id: true}
 			}
 		}
+
+		list.Refresh()
 	}
 
-	backBtn := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
+	// BOTÃO VOLTAR
+	btnBack := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
 		parent := filepath.Dir(dir)
 		if parent != dir {
 			dir = parent
 			pathLabel.SetText(dir)
-			files = listDir(dir, exts)
-			updateList()
+			files = d.listDir(dir)
+			filtered = d.applyFilter(files, search.Text)
 			selected = map[int]bool{}
+			list.Refresh()
 		}
 	})
 
-	openBtn := widget.NewButtonWithIcon("Abrir", theme.ConfirmIcon(), func() {
-		openSelection(win, dir, filtered, selected, onSelect)
-	})
-
-	cancelBtn := widget.NewButtonWithIcon("Cancelar", theme.CancelIcon(), func() {
-		win.Close()
-	})
-
-	top := container.NewBorder(nil, nil, backBtn, nil,
-		container.NewVBox(pathLabel, searchEntry),
-	)
-
-	bottom := container.NewHBox(openBtn, cancelBtn)
-	content := container.NewBorder(top, bottom, nil, nil, list)
-	win.SetContent(content)
-	return win
-}
-
-func openSelection(win fyne.Window, dir string, files []fs.FileInfo, selected map[int]bool, onSelect FileSelectCallback) {
-	var paths []string
-	for i, ok := range selected {
-		if ok {
-			f := files[i]
+	// BOTÃO ABRIR
+	btnOpen := widget.NewButtonWithIcon("Abrir", theme.ConfirmIcon(), func() {
+		var out []string
+		for i := range selected {
+			f := filtered[i]
 			if !f.IsDir() {
-				paths = append(paths, filepath.Join(dir, f.Name()))
+				out = append(out, filepath.Join(dir, f.Name()))
 			}
 		}
+
+		if len(out) > 0 {
+			d.saveLastDir(dir)
+			d.onSelect(out)
+			win.Close()
+		}
+	})
+
+	// BUSCA
+	search.OnChanged = func(txt string) {
+		filtered = d.applyFilter(files, txt)
+		selected = map[int]bool{}
+		list.Refresh()
 	}
-	if len(paths) > 0 {
-		saveLastDir(dir)
-		onSelect(paths)
-		win.Close()
-	}
+
+	// LAYOUT
+	top := container.NewBorder(nil, nil, btnBack, nil,
+		container.NewVBox(pathLabel, search),
+	)
+
+	bottom := container.NewHBox(btnOpen)
+
+	win.SetContent(
+		container.NewBorder(
+			top,
+			bottom,
+			nil, nil,
+			list,
+		),
+	)
+
+	win.Show()
 }
 
-// listDir lista arquivos e pastas com filtro opcional
-func listDir(dir string, exts []string) []fs.FileInfo {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return []fs.FileInfo{}
-	}
+//////////////////////////////////////////////////////////////
+// FUNÇÕES AUXILIARES
+//////////////////////////////////////////////////////////////
+
+func (d *FileDialogOpen) listDir(path string) []fs.FileInfo {
+	entries, _ := os.ReadDir(path)
 
 	var list []fs.FileInfo
+
 	for _, e := range entries {
 		info, err := e.Info()
 		if err != nil {
 			continue
 		}
-		if len(exts) > 0 && !info.IsDir() {
-			keep := false
-			for _, ext := range exts {
+
+		if len(d.exts) > 0 && !info.IsDir() {
+			ok := false
+			for _, ext := range d.exts {
 				if strings.EqualFold(filepath.Ext(info.Name()), ext) {
-					keep = true
+					ok = true
 					break
 				}
 			}
-			if !keep {
+			if !ok {
 				continue
 			}
 		}
+
 		list = append(list, info)
 	}
 
 	sort.Slice(list, func(i, j int) bool {
 		a, b := list[i], list[j]
-		if a.IsDir() && !b.IsDir() {
-			return true
-		}
-		if !a.IsDir() && b.IsDir() {
-			return false
+		if a.IsDir() != b.IsDir() {
+			return a.IsDir()
 		}
 		return strings.ToLower(a.Name()) < strings.ToLower(b.Name())
 	})
+
 	return list
 }
 
-func saveLastDir(dir string) {
-	_ = os.WriteFile(lastDirFile, []byte(dir), 0644)
+func (d *FileDialogOpen) applyFilter(files []fs.FileInfo, query string) []fs.FileInfo {
+	if query == "" {
+		return files
+	}
+
+	q := strings.ToLower(query)
+	var out []fs.FileInfo
+
+	for _, f := range files {
+		if strings.Contains(strings.ToLower(f.Name()), q) {
+			out = append(out, f)
+		}
+	}
+
+	return out
 }
 
-func loadLastDir() string {
+//////////////////////////////////////////////////////////////
+// ÚLTIMO DIRETÓRIO
+//////////////////////////////////////////////////////////////
+
+func (d *FileDialogOpen) saveLastDir(dir string) {
+	os.WriteFile(lastDirFile, []byte(dir), 0644)
+}
+
+func (d *FileDialogOpen) loadLastDir() {
 	b, err := os.ReadFile(lastDirFile)
-	if err != nil {
-		return ""
+	if err == nil {
+		d.lastDir = strings.TrimSpace(string(b))
 	}
-	return strings.TrimSpace(string(b))
 }
