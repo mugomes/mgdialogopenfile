@@ -3,7 +3,7 @@
 
 // Site: https://mugomes.github.io
 
-package mgfileopen
+package mgdialogopenfile
 
 import (
 	"io/fs"
