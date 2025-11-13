@@ -19,7 +19,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-var lastDirFile = filepath.Join(os.TempDir(), ".mgfileopen_lastdir")
+var lastDirFile = filepath.Join(os.TempDir(), ".mgdialogfileopen_lastdir")
 
 // Callback genérico: se multiSelect = false → len(paths) == 1
 type FileSelectCallback func(paths []string)
