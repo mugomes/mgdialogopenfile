@@ -138,7 +138,7 @@ func (d *FileDialogOpen) Show() {
 		var out []string
 		for i := range selected {
 			f := filtered[i]
-			if !f.IsDir() {
+			if !f.IsDir() && selected[i] {
 				out = append(out, filepath.Join(dir, f.Name()))
 			}
 		}
