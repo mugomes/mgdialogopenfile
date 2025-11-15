@@ -55,7 +55,7 @@ func (d *FileDialogOpen) Show() {
 
 	pathLabel := widget.NewLabel(dir)
 	search := widget.NewEntry()
-	search.SetPlaceHolder("🔍 Buscar...")
+	search.SetPlaceHolder("🔍 Search...")
 
 	files := d.listDir(dir)
 	filtered := files
@@ -134,7 +134,7 @@ func (d *FileDialogOpen) Show() {
 	})
 
 	// BOTÃO ABRIR
-	btnOpen := widget.NewButtonWithIcon("Abrir", theme.ConfirmIcon(), func() {
+	btnOpen := widget.NewButtonWithIcon("Open", theme.ConfirmIcon(), func() {
 		var out []string
 		for i := range selected {
 			f := filtered[i]
