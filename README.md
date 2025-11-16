@@ -1,5 +1,8 @@
 # MGDialogOpenFile
 
+> [!NOTE]
+> This project is no longer maintained, I recommend using the [MGDialogBox](https://github.com/mugomes/mgdialogbox).
+
 MGDialogOpenFile é um componente sofisticado para Fyne que abre uma caixa de dialogo para abrir arquivo ou múltiplos arquivos.
 
 ## Recursos
